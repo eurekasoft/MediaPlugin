@@ -80,9 +80,9 @@ namespace Plugin.Media
         /// 
         /// </summary>
         /// <returns></returns>
-        public Task<MediaFile> PickPhotoAsync(PickMediaOptions options = null)
+        public Task<IEnumerable<MediaFile>> PickPhotoAsync(PickMediaOptions options = null)
         {
-            return Task.FromResult<MediaFile>(null);
+            return Task.FromResult<IEnumerable<MediaFile>>(null);
         }
 
         /// <summary>

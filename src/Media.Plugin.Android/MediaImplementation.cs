@@ -26,7 +26,7 @@ using Plugin.Media.Abstractions;
 using Plugin.Permissions;
 using Android.Media;
 using Android.Graphics;
-
+using System.Collections.Generic;
 namespace Plugin.Media
 {
     /// <summary>
@@ -73,200 +73,44 @@ namespace Plugin.Media
             int id = GetRequestId();
             return CreateMediaIntent(id, "image/*", Intent.ActionPick, null, tasked: false);
         }
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="options"></param>
-        /// <returns></returns>
-        public Intent GetTakePhotoUI(StoreCameraMediaOptions options)
-        {
-            if (!IsCameraAvailable)
-                throw new NotSupportedException();
-
-            VerifyOptions(options);
-
-            int id = GetRequestId();
-            return CreateMediaIntent(id, "image/*", MediaStore.ActionImageCapture, options, tasked: false);
-        }
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <returns></returns>
-        public Intent GetPickVideoUI()
-        {
-            int id = GetRequestId();
-            return CreateMediaIntent(id, "video/*", Intent.ActionPick, null, tasked: false);
-        }
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="options"></param>
-        /// <returns></returns>
-        public Intent GetTakeVideoUI(StoreVideoOptions options)
-        {
-            if (!IsCameraAvailable)
-                throw new NotSupportedException();
-
-            VerifyOptions(options);
-
-            return CreateMediaIntent(GetRequestId(), "video/*", MediaStore.ActionVideoCapture, options, tasked: false);
-        }
 
         /// <summary>
         /// Picks a photo from the default gallery
         /// </summary>
         /// <returns>Media file or null if canceled</returns>
-        public async Task<MediaFile> PickPhotoAsync(PickMediaOptions options = null)
+        public async Task<IEnumerable<MediaFile>> PickPhotoAsync(PickMediaOptions options = null)
         {
             if (!(await RequestStoragePermission()))
             {
                 return null;
             }
-            var media = await TakeMediaAsync("image/*", Intent.ActionPick, null);
+            var media = await TakeMediaAsync("image/*", Intent.ActionGetContent, null);
 
             if (options == null)
                 return media;
 
             //check to see if we need to rotate if success
-            if (!string.IsNullOrWhiteSpace(media?.Path) && options.PhotoSize != PhotoSize.Full)
+            foreach(MediaFile m_file in media)
             {
-                try
+                if (!string.IsNullOrWhiteSpace(m_file.Path) && options.PhotoSize != PhotoSize.Full)
                 {
-                    await ResizeAsync(media.Path, options.PhotoSize, options.CompressionQuality);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("Unable to check orientation: " + ex);
-                }
-            }
-
-            return media;
-        }
-
-
-        /// <summary>
-        /// Take a photo async with specified options
-        /// </summary>
-        /// <param name="options">Camera Media Options</param>
-        /// <returns>Media file of photo or null if canceled</returns>
-        public async Task<MediaFile> TakePhotoAsync(StoreCameraMediaOptions options)
-        {
-            if (!IsCameraAvailable)
-                throw new NotSupportedException();
-
-            if (!(await RequestStoragePermission()))
-            {
-                return null;
-            }
-
-
-            VerifyOptions(options);
-
-            var media = await TakeMediaAsync("image/*", MediaStore.ActionImageCapture, options);
-
-            if (string.IsNullOrWhiteSpace(media?.Path))
-                return media;
-
-            if (options.SaveToAlbum)
-            {
-                try
-                {
-                    var fileName = System.IO.Path.GetFileName(media.Path);
-                    var publicUri = MediaPickerActivity.GetOutputMediaFile(context, options.Directory ?? "temp", fileName, true, true);
-                    using (System.IO.Stream input = File.OpenRead(media.Path))
-                        using (System.IO.Stream output = File.Create(publicUri.Path))
-                            input.CopyTo(output);
-
-                    media.AlbumPath = publicUri.Path;
-
-                    var f = new Java.IO.File(publicUri.Path);
-
-                    //MediaStore.Images.Media.InsertImage(context.ContentResolver,
-                    //    f.AbsolutePath, f.Name, null);
-
                     try
                     {
-                        Android.Media.MediaScannerConnection.ScanFile(context, new[] { f.AbsolutePath }, null, context as MediaPickerActivity);
-
-                        ContentValues values = new ContentValues();
-                        values.Put(MediaStore.Images.Media.InterfaceConsts.Title, System.IO.Path.GetFileNameWithoutExtension(f.AbsolutePath));
-                        values.Put(MediaStore.Images.Media.InterfaceConsts.Description, string.Empty);
-                        values.Put(MediaStore.Images.Media.InterfaceConsts.DateTaken, Java.Lang.JavaSystem.CurrentTimeMillis());
-                        values.Put(MediaStore.Images.ImageColumns.BucketId, f.ToString().ToLowerInvariant().GetHashCode());
-                        values.Put(MediaStore.Images.ImageColumns.BucketDisplayName, f.Name.ToLowerInvariant());
-                        values.Put("_data", f.AbsolutePath);
-
-                        var cr = context.ContentResolver;
-                        cr.Insert(MediaStore.Images.Media.ExternalContentUri, values);
+                        await ResizeAsync(m_file.Path, options.PhotoSize, options.CompressionQuality);
                     }
-                    catch (Exception ex1)
+                    catch (Exception ex)
                     {
-                        Console.WriteLine("Unable to save to scan file: " + ex1);
+                        Console.WriteLine("Unable to check orientation: " + ex);
                     }
-
-                    var contentUri = Android.Net.Uri.FromFile(f);
-                    var mediaScanIntent = new Intent(Intent.ActionMediaScannerScanFile, contentUri);
-                    context.SendBroadcast(mediaScanIntent);
-                }
-                catch (Exception ex2)
-                {
-                    Console.WriteLine("Unable to save to gallery: " + ex2);
                 }
             }
-
-            //check to see if we need to rotate if success
-
-            try
-            {
-                await FixOrientationAndResizeAsync(media.Path, options.PhotoSize, options.CompressionQuality);
-            }
-            catch(Exception ex)
-            {
-                Console.WriteLine("Unable to check orientation: " + ex);
-            }
-            
 
             return media;
-        }
-
-        /// <summary>
-        /// Picks a video from the default gallery
-        /// </summary>
-        /// <returns>Media file of video or null if canceled</returns>
-        public async Task<MediaFile> PickVideoAsync()
-        {
-
-            if (!(await RequestStoragePermission()))
-            {
-                return null;
-            }
-
-            return await TakeMediaAsync("video/*", Intent.ActionPick, null);
-        }
-
-        /// <summary>
-        /// Take a video with specified options
-        /// </summary>
-        /// <param name="options">Video Media Options</param>
-        /// <returns>Media file of new video or null if canceled</returns>
-        public async Task<MediaFile> TakeVideoAsync(StoreVideoOptions options)
-        {
-            if (!IsCameraAvailable)
-                throw new NotSupportedException();
-
-            if (!(await RequestStoragePermission()))
-            {
-                return null;
-            }
-
-            VerifyOptions(options);
-
-            return await TakeMediaAsync("video/*", MediaStore.ActionVideoCapture, options);
         }
 
         private readonly Context context;
         private int requestId;
-        private TaskCompletionSource<MediaFile> completionSource;
+        private TaskCompletionSource<IEnumerable<MediaFile>> completionSource;
 
 
         async Task<bool> RequestStoragePermission()
@@ -276,6 +120,7 @@ namespace Plugin.Media
             {
                 Console.WriteLine("Does not have storage permission granted, requesting.");
                 var results = await CrossPermissions.Current.RequestPermissionsAsync(Permissions.Abstractions.Permission.Storage);
+                int x = 5;
                 if (results.ContainsKey(Permissions.Abstractions.Permission.Storage) &&
                     results[Permissions.Abstractions.Permission.Storage] != Permissions.Abstractions.PermissionStatus.Granted)
                 {
@@ -344,21 +189,21 @@ namespace Plugin.Media
             return id;
         }
 
-        private Task<MediaFile> TakeMediaAsync(string type, string action, StoreMediaOptions options)
+        private Task<IEnumerable<MediaFile>> TakeMediaAsync(string type, string action, StoreMediaOptions options)
         {
             int id = GetRequestId();
 
-            var ntcs = new TaskCompletionSource<MediaFile>(id);
+            var ntcs = new TaskCompletionSource<IEnumerable<MediaFile>>(id);
             if (Interlocked.CompareExchange(ref this.completionSource, ntcs, null) != null)
                 throw new InvalidOperationException("Only one operation can be active at a time");
-
+           
             this.context.StartActivity(CreateMediaIntent(id, type, action, options));
 
             EventHandler<MediaPickedEventArgs> handler = null;
             handler = (s, e) =>
             {
                 var tcs = Interlocked.Exchange(ref this.completionSource, null);
-
+                //remove any existing handler
                 MediaPickerActivity.MediaPicked -= handler;
 
                 if (e.RequestId != id)

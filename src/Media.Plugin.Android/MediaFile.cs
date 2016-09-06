@@ -36,30 +36,30 @@ namespace Plugin.Media
         /// <param name="self"></param>
         /// <param name="context"></param>
         /// <returns></returns>
-        public static Task<MediaFile> GetMediaFileExtraAsync(this Intent self, Context context)
-        {
-            if (self == null)
-                throw new ArgumentNullException("self");
-            if (context == null)
-                throw new ArgumentNullException("context");
+        //public static Task<MediaFile> GetMediaFileExtraAsync(this Intent self, Context context)
+        //{
+        //    if (self == null)
+        //        throw new ArgumentNullException("self");
+        //    if (context == null)
+        //        throw new ArgumentNullException("context");
 
-            string action = self.GetStringExtra("action");
-            if (action == null)
-                throw new ArgumentException("Intent was not results from MediaPicker", "self");
+        //    string action = self.GetStringExtra("action");
+        //    if (action == null)
+        //        throw new ArgumentException("Intent was not results from MediaPicker", "self");
 
-            var uri = (Android.Net.Uri)self.GetParcelableExtra("MediaFile");
-            bool isPhoto = self.GetBooleanExtra("isPhoto", false);
-            var path = (Android.Net.Uri)self.GetParcelableExtra("path");
-            bool saveToAlbum = false;
-            try
-            {
-                saveToAlbum = (bool)self.GetParcelableExtra("album_save");
-            }
-            catch { }
+        //    var uri = (Android.Net.Uri)self.GetParcelableExtra("MediaFile");
+        //    bool isPhoto = self.GetBooleanExtra("isPhoto", false);
+        //    var path = (Android.Net.Uri)self.GetParcelableExtra("path");
+        //    bool saveToAlbum = false;
+        //    try
+        //    {
+        //        saveToAlbum = (bool)self.GetParcelableExtra("album_save");
+        //    }
+        //    catch { }
 
-            return MediaPickerActivity.GetMediaFileAsync(context, 0, action, isPhoto, ref path, uri, saveToAlbum)
-                .ContinueWith(t => t.Result.ToTask()).Unwrap();
-        }
+        //    return MediaPickerActivity.GetMediaFileAsync(context, 0, action, isPhoto, ref path, uri, saveToAlbum)
+        //        .ContinueWith(t => t.Result.ToTask()).Unwrap();
+        //}
     }
 
 }

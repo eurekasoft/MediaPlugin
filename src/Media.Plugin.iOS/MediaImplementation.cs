@@ -22,6 +22,7 @@ using System.IO;
 using System.Linq;
 
 using UIKit;
+using System.Collections.Generic;
 
 namespace Plugin.Media
 {
@@ -89,7 +90,7 @@ namespace Plugin.Media
         /// Picks a photo from the default gallery
         /// </summary>
         /// <returns>Media file or null if canceled</returns>
-        public Task<MediaFile> PickPhotoAsync(PickMediaOptions options = null)
+        public Task<IEnumerable<MediaFile>> PickPhotoAsync(PickMediaOptions options = null)
         {
             if (!IsPickPhotoSupported)
                 throw new NotSupportedException();
@@ -99,7 +100,7 @@ namespace Plugin.Media
                 PhotoSize = options?.PhotoSize ?? PhotoSize.Full
             };
 
-            return GetMediaAsync(UIImagePickerControllerSourceType.PhotoLibrary, TypeImage, cameraOptions);
+            return null;//GetMediaAsync(UIImagePickerControllerSourceType.PhotoLibrary, TypeImage, cameraOptions);
         }
         /// <summary>
         /// 
@@ -328,6 +329,11 @@ namespace Plugin.Media
                 default:
                     return UIImagePickerControllerQualityType.High;
             }
+        }
+
+        public Task<IEnumerable<MediaFile>> PickMultiplePhotoAsync(PickMediaOptions options = null)
+        {
+            throw new NotImplementedException();
         }
     }
 }
