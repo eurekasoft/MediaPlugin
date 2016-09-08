@@ -127,6 +127,17 @@ namespace Plugin.Media
                     pickIntent.PutExtra(Intent.ExtraAllowMultiple, true);
                     pickIntent.SetType(type);
                 }
+                else
+                {
+                    if (!ran)
+                    {
+                        this.path = GetOutputMediaFile(this, b.GetString(ExtraPath), this.title, this.isPhoto, false);
+                        Touch();
+                        pickIntent.PutExtra(MediaStore.ExtraOutput, this.path);
+                    }
+                    else
+                        this.path = Uri.Parse(b.GetString(ExtraPath));
+                }
                 //take photo / video setup
                 if (!ran)
                     StartActivityForResult(pickIntent, this.id);
@@ -142,6 +153,13 @@ namespace Plugin.Media
             }
         }
 
+        private void Touch()
+        {
+            if (this.path.Scheme != "file")
+                return;
+
+            File.Create(GetLocalPath(this.path)).Close();
+        }
         internal static Task<MediaPickedEventArgs> GetMediaFileAsync(Context context, int requestCode, string action, bool isPhoto, ref Uri path, List<Uri> data, bool saveToAlbum)
         {
             Task<List<Tuple<string, bool>>> pathFuture;

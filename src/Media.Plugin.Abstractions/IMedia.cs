@@ -52,9 +52,9 @@ namespace Plugin.Media.Abstractions
         /// <summary>
         /// Take a photo async with specified options
         /// </summary>
-        /// <param name="options">Camera Media Options</param>
+        /// <param name = "options" > Camera Media Options</param>
         /// <returns>Media file of photo or null if canceled</returns>
-        //Task<MediaFile> TakePhotoAsync(StoreCameraMediaOptions options);
+        Task<MediaFile> TakePhotoAsync(StoreCameraMediaOptions options);
 
 
         /// <summary>

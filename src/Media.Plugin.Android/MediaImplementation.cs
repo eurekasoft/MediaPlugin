@@ -18,6 +18,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Linq;
 using Android.Content;
 using Android.Content.PM;
 using Android.OS;
@@ -106,6 +107,48 @@ namespace Plugin.Media
             }
 
             return media;
+        }
+
+        /// <summary>
+        /// Take a photo async with specified options
+        /// </summary>
+        /// <param name="options">Camera Media Options</param>
+        /// <returns>Media file of photo or null if canceled</returns>
+        public async Task<MediaFile> TakePhotoAsync(StoreCameraMediaOptions options)
+        {
+            if (!IsCameraAvailable)
+                throw new NotSupportedException();
+
+            if (!(await RequestStoragePermission()))
+            {
+                return null;
+            }
+
+            IEnumerable<MediaFile>media = await TakeMediaAsync("image/*", MediaStore.ActionImageCapture, null);
+            
+            VerifyOptions(options);
+
+            MediaFile photo = media.ToList<MediaFile>()[0];
+            if (options == null)
+                return photo;
+
+            //check to see if we need to rotate if success
+            foreach (MediaFile m_file in media)
+            {
+                if (!string.IsNullOrWhiteSpace(m_file.Path) && options.PhotoSize != PhotoSize.Full)
+                {
+                    try
+                    {
+                        await ResizeAsync(m_file.Path, options.PhotoSize, options.CompressionQuality);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("Unable to check orientation: " + ex);
+                    }
+                }
+            }
+
+            return photo;
         }
 
         private readonly Context context;
