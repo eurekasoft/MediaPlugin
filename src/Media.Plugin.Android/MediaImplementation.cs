@@ -36,12 +36,22 @@ namespace Plugin.Media
     [Android.Runtime.Preserve(AllMembers = true)]
     public class MediaImplementation : IMedia
     {
+        public struct ImagesResult
+        {
+            public IEnumerable<MediaFile> Media { get; set; }
+            public Exception Error { get; set; }
+            public ImagesResult(IEnumerable<MediaFile> media,Exception error)
+            {
+                this.Media = media;
+                this.Error = error;
+            }
+
+        }
         /// <summary>
         /// Implementation
         /// </summary>
         public MediaImplementation()
         {
-
             this.context = Android.App.Application.Context;
             IsCameraAvailable = context.PackageManager.HasSystemFeature(PackageManager.FeatureCamera);
 
@@ -85,19 +95,20 @@ namespace Plugin.Media
             {
                 return null;
             }
-            var media = await TakeMediaAsync("image/*", Intent.ActionGetContent, null);
-
-            if (options == null)
-                return media;
-
-            //check to see if we need to rotate if success
-            foreach(MediaFile m_file in media)
+            var media = await TakeMediaAsync("image/*", Intent.ActionOpenDocument, null);
+            if (media.Error != null)
             {
-                if (!string.IsNullOrWhiteSpace(m_file.Path) && options.PhotoSize != PhotoSize.Full)
+                throw media.Error;
+            }
+         
+            //check to see if we need to rotate if success
+            foreach (MediaFile m_file in media.Media)
+            {
+                if (!string.IsNullOrWhiteSpace(m_file.Path))
                 {
                     try
                     {
-                        await ResizeAsync(m_file.Path, options.PhotoSize, options.CompressionQuality);
+                        await FixOrientationAsync(m_file.Path, PhotoSize.Full, 100);
                     }
                     catch (Exception ex)
                     {
@@ -106,7 +117,7 @@ namespace Plugin.Media
                 }
             }
 
-            return media;
+            return media.Media;
         }
 
         /// <summary>
@@ -119,41 +130,48 @@ namespace Plugin.Media
             if (!IsCameraAvailable)
                 throw new NotSupportedException();
 
-            if (!(await RequestStoragePermission()))
+            if (!(await RequestCameraPermission()))
             {
                 return null;
             }
 
-            IEnumerable<MediaFile>media = await TakeMediaAsync("image/*", MediaStore.ActionImageCapture, null);
-            
-            VerifyOptions(options);
-
-            MediaFile photo = media.ToList<MediaFile>()[0];
-            if (options == null)
-                return photo;
-
-            //check to see if we need to rotate if success
-            foreach (MediaFile m_file in media)
+            var media = await TakeMediaAsync("image/*", MediaStore.ActionImageCapture, null);
+            if(media.Error != null)
             {
-                if (!string.IsNullOrWhiteSpace(m_file.Path) && options.PhotoSize != PhotoSize.Full)
-                {
-                    try
-                    {
-                        await ResizeAsync(m_file.Path, options.PhotoSize, options.CompressionQuality);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine("Unable to check orientation: " + ex);
-                    }
-                }
+                throw media.Error;
             }
 
-            return photo;
+            if(media.Media.Count() > 0)
+            {
+                VerifyOptions(options);
+                MediaFile photo = media.Media.ToList<MediaFile>()[0];
+                if (options == null)
+                    return photo;
+
+                //check to see if we need to rotate if success
+                foreach (MediaFile m_file in media.Media)
+                {
+                    if (!string.IsNullOrWhiteSpace(m_file.Path))
+                    {
+                        try
+                        {
+                            await FixOrientationAsync(m_file.Path, options.PhotoSize, options.CompressionQuality);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine("Unable to check orientation: " + ex);
+                        }
+                    }
+                }
+
+                return photo;
+            }
+            return null;
         }
 
         private readonly Context context;
         private int requestId;
-        private TaskCompletionSource<IEnumerable<MediaFile>> completionSource;
+        private TaskCompletionSource<ImagesResult> completionSource;
 
 
         async Task<bool> RequestStoragePermission()
@@ -168,6 +186,24 @@ namespace Plugin.Media
                     results[Permissions.Abstractions.Permission.Storage] != Permissions.Abstractions.PermissionStatus.Granted)
                 {
                     Console.WriteLine("Storage permission Denied.");
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        async Task<bool> RequestCameraPermission()
+        {
+            var status = await CrossPermissions.Current.CheckPermissionStatusAsync(Permissions.Abstractions.Permission.Camera);
+            if (status != Permissions.Abstractions.PermissionStatus.Granted)
+            {
+                Console.WriteLine("Does not have camera permission granted, requesting.");
+                var results = await CrossPermissions.Current.RequestPermissionsAsync(Permissions.Abstractions.Permission.Camera);
+                if (results.ContainsKey(Permissions.Abstractions.Permission.Camera) &&
+                    results[Permissions.Abstractions.Permission.Camera] != Permissions.Abstractions.PermissionStatus.Granted)
+                {
+                    Console.WriteLine("Camera permission Denied.");
                     return false;
                 }
             }
@@ -232,11 +268,11 @@ namespace Plugin.Media
             return id;
         }
 
-        private Task<IEnumerable<MediaFile>> TakeMediaAsync(string type, string action, StoreMediaOptions options)
+        private Task<ImagesResult> TakeMediaAsync(string type, string action, StoreMediaOptions options)
         {
             int id = GetRequestId();
 
-            var ntcs = new TaskCompletionSource<IEnumerable<MediaFile>>(id);
+            var ntcs = new TaskCompletionSource<ImagesResult>(id);
             if (Interlocked.CompareExchange(ref this.completionSource, ntcs, null) != null)
                 throw new InvalidOperationException("Only one operation can be active at a time");
            
@@ -253,11 +289,14 @@ namespace Plugin.Media
                     return;
 
                 if (e.Error != null)
-                    tcs.SetResult(null);
+                {
+                    tcs.SetResult(new ImagesResult(null,e.Error));
+                }
+                    
                 else if (e.IsCanceled)
-                    tcs.SetResult(null);
+                    tcs.SetResult(new ImagesResult(Enumerable.Empty<MediaFile>(), null));
                 else
-                    tcs.SetResult(e.Media);
+                    tcs.SetResult(new ImagesResult(e.Media,null));
             };
 
             MediaPickerActivity.MediaPicked += handler;
@@ -271,7 +310,7 @@ namespace Plugin.Media
         /// <param name="filePath">The file image path</param>
         /// <param name="photoSize">Photo size to go to.</param>
         /// <returns>True if rotation or compression occured, else false</returns>
-        public Task<bool> FixOrientationAndResizeAsync(string filePath, PhotoSize photoSize, int quality)
+        public Task<bool> FixOrientationAsync(string filePath, PhotoSize photoSize, int quality)
         {
             if (string.IsNullOrWhiteSpace(filePath))
                 return Task.FromResult(false);
@@ -284,27 +323,11 @@ namespace Plugin.Media
                     {
                         var rotation = GetRotation(filePath);
 
-                        if (rotation == 0 && photoSize == PhotoSize.Full)
+                        if (rotation == 0)
                             return false;
-
-                        var percent = 1.0f;
-                        switch (photoSize)
-                        {
-                            case PhotoSize.Large:
-                                percent = .75f;
-                                break;
-                            case PhotoSize.Medium:
-                                percent = .5f;
-                                break;
-                            case PhotoSize.Small:
-                                percent = .25f;
-                                break;
-                        }
 
                         using (var originalImage = BitmapFactory.DecodeFile(filePath))
                         {
-                           
-
                             //if we need to rotate then go for it.
                             //then compresse it if needed
                             if (rotation != 0)
@@ -313,26 +336,12 @@ namespace Plugin.Media
                                 matrix.PostRotate(rotation);
                                 using (var rotatedImage = Bitmap.CreateBitmap(originalImage, 0, 0, originalImage.Width, originalImage.Height, matrix, true))
                                 {
-                                    if (photoSize != PhotoSize.Full)
+                                    using (var stream = File.Open(filePath, FileMode.Create, FileAccess.ReadWrite))
                                     {
-                                        using (var compressedImage = Bitmap.CreateScaledBitmap(rotatedImage, (int)(rotatedImage.Width * percent), (int)(rotatedImage.Height * percent), false))
-                                        {
-                                            using (var stream = File.Open(filePath, FileMode.Create, FileAccess.ReadWrite))
-                                            {
-                                                compressedImage.Compress(Bitmap.CompressFormat.Jpeg, quality, stream);
-                                                stream.Close();
-                                            }
-                                            compressedImage.Recycle();
-                                        }
+                                        rotatedImage.Compress(Bitmap.CompressFormat.Jpeg, quality, stream);
+                                        stream.Close();
                                     }
-                                    else
-                                    {
-                                        using (var stream = File.Open(filePath, FileMode.Create, FileAccess.ReadWrite))
-                                        {
-                                            rotatedImage.Compress(Bitmap.CompressFormat.Jpeg, quality, stream);
-                                            stream.Close();
-                                        }
-                                    }
+                                    
                                     rotatedImage.Recycle();
                                 }
                                 originalImage.Recycle();
@@ -340,23 +349,7 @@ namespace Plugin.Media
                                 GC.Collect();
                                 return true;
                             }
-
-
-                            using (var compressedImage = Bitmap.CreateScaledBitmap(originalImage, (int)(originalImage.Width * percent), (int)(originalImage.Height * percent), false))
-                            {
-                                using (var stream = File.Open(filePath, FileMode.Create, FileAccess.ReadWrite))
-                                {
-                                    compressedImage.Compress(Bitmap.CompressFormat.Jpeg, quality, stream);
-                                    stream.Close();
-                                }
-
-                                compressedImage.Recycle();
-                            }
-
-                            originalImage.Recycle();
-                            // Dispose of the Java side bitmap.
-                            GC.Collect();
-                            return true;
+                            return false;
                         }
                     }
                     catch (Exception ex)

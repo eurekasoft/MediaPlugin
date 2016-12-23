@@ -1,6 +1,7 @@
-﻿using Plugin.Media.Abstractions;
+﻿
 using System;
-
+using Plugin.Media;
+using Plugin.Media.Abstractions;
 namespace Plugin.Media
 {
     /// <summary>
@@ -8,12 +9,12 @@ namespace Plugin.Media
     /// </summary>
     public class CrossMedia
     {
-        static Lazy<IMedia> Implementation = new Lazy<IMedia>(() => CreateMedia(), System.Threading.LazyThreadSafetyMode.PublicationOnly);
+        static Lazy<Abstractions.IMedia> Implementation = new Lazy<Abstractions.IMedia>(() => CreateMedia(), System.Threading.LazyThreadSafetyMode.PublicationOnly);
 
         /// <summary>
         /// Current settings to use
         /// </summary>
-        public static IMedia Current
+        public static Abstractions.IMedia Current
         {
             get
             {
@@ -26,7 +27,7 @@ namespace Plugin.Media
             }
         }
 
-        static IMedia CreateMedia()
+        static Abstractions.IMedia CreateMedia()
         {
 #if PORTABLE
             return null;

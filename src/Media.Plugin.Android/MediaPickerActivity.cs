@@ -29,7 +29,7 @@ using Uri = Android.Net.Uri;
 using Plugin.Media.Abstractions;
 using Android.Net;
 using System.Collections.Generic;
-
+using System.Diagnostics;
 namespace Plugin.Media
 {
     /// <summary>
@@ -117,11 +117,11 @@ namespace Plugin.Media
 
             this.action = b.GetString(ExtraAction);
             Intent pickIntent = null;
-            try
-            {
+            //try
+            //{
                 pickIntent = new Intent(this.action);
                 //select image / video
-                if (this.action == Intent.ActionGetContent)
+                if (this.action == Intent.ActionOpenDocument)
                 {
                     //allow pick multiple images.
                     pickIntent.PutExtra(Intent.ExtraAllowMultiple, true);
@@ -129,6 +129,21 @@ namespace Plugin.Media
                 }
                 else
                 {
+                    if (!this.isPhoto)
+                    {
+                        this.seconds = b.GetInt(MediaStore.ExtraDurationLimit, 0);
+                        if (this.seconds != 0)
+                            pickIntent.PutExtra(MediaStore.ExtraDurationLimit, seconds);
+                    }
+
+                    this.saveToAlbum = b.GetBoolean(ExtraSaveToAlbum);
+                    pickIntent.PutExtra(ExtraSaveToAlbum, this.saveToAlbum);
+
+                    this.quality = (VideoQuality)b.GetInt(MediaStore.ExtraVideoQuality, (int)VideoQuality.High);
+                    //pickIntent.PutExtra(MediaStore.ExtraVideoQuality, GetVideoQuality(this.quality));
+
+                    if (front != 0)
+                        pickIntent.PutExtra(ExtraFront, (int)Android.Hardware.CameraFacing.Front);
                     if (!ran)
                     {
                         this.path = GetOutputMediaFile(this, b.GetString(ExtraPath), this.title, this.isPhoto, false);
@@ -141,16 +156,6 @@ namespace Plugin.Media
                 //take photo / video setup
                 if (!ran)
                     StartActivityForResult(pickIntent, this.id);
-            }
-            catch (Exception ex)
-            {
-                OnMediaPicked(new MediaPickedEventArgs(this.id, ex));
-            }
-            finally
-            {
-                if (pickIntent != null)
-                    pickIntent.Dispose();
-            }
         }
 
         private void Touch()
@@ -166,28 +171,36 @@ namespace Plugin.Media
             string originalPath = null;
             List<MediaFile> m_files = new List<MediaFile>();
 
-            if (action != Intent.ActionPick)
+            if (action != Intent.ActionOpenDocument)
             {
-
                 originalPath = path.Path;
-                
                 // Not all camera apps respect EXTRA_OUTPUT, some will instead
                 // return a content or file uri from data.
-                if (data != null && data[0].Path != originalPath)
+
+                if (data != null && data.Count > 0)
                 {
-                    originalPath = data[0].ToString();
-                    string currentPath = path.Path;
-                    List<Tuple<string, bool>> tup_list = new List<Tuple<string, bool>>();
-                    pathFuture = TryMoveFileAsync(context, data[0], path, isPhoto, false).ContinueWith(t =>
-                    new List<Tuple<string, bool>>() {new Tuple<string,bool>(t.Result ? currentPath : null, false) });
+                   if( data[0].Path != originalPath)
+                    {
+                        originalPath = data[0].ToString();
+                        string currentPath = path.Path;
+                        List<Tuple<string, bool>> tup_list = new List<Tuple<string, bool>>();
+                        pathFuture = TryMoveFileAsync(context, data[0], path, isPhoto, false).ContinueWith(t =>
+                        new List<Tuple<string, bool>>() { new Tuple<string, bool>(t.Result ? currentPath : null, false) });
+                    }
+
+                   else
+                    {
+                        pathFuture = TaskFromResult(new List<Tuple<string, bool>> { new Tuple<string, bool>(path.Path, false) });
+                    }
                 }
                 else
                 {
-                    pathFuture = TaskFromResult(new List<Tuple<string, bool>> { new Tuple<string,bool>(path.Path, false) });
+                    pathFuture = TaskFromResult(new List<Tuple<string, bool>> { new Tuple<string, bool>(path.Path, false) });
                 }
             }
+
             //Select photo video
-            if (data != null)
+            else if (data != null && data.Count > 0)
             {
                 //path = data;
                 pathFuture = GetFileForUriAsync(context, data, isPhoto, false);
@@ -198,6 +211,11 @@ namespace Plugin.Media
 
             return pathFuture.ContinueWith(t =>
             {
+                if (t.IsFaulted)
+                {
+                    throw t.Exception;
+                }
+                
                 foreach (Tuple<string, bool> tup in t.Result)
                 {
                     string resultPath = tup.Item1;
@@ -267,8 +285,7 @@ namespace Plugin.Media
 
                             for (int i = 0; i < clipData.ItemCount; i++)
                             {
-
-                                if (i > 19)
+                                if (i > 10)
                                 {
                                     break;
                                 }
@@ -281,24 +298,39 @@ namespace Plugin.Media
                         {
                             paths.Add(data.Data);
                         }
-                        //transform file paths to mediafiles
-                        if ((int)Build.VERSION.SdkInt >= 22)
+                    }
+                    //transform file paths to mediafiles
+                    if ((int)Build.VERSION.SdkInt >= 22)
+                    {
+                        try
                         {
-                            //data.d
                             var e = await GetMediaFileAsync(this, requestCode, this.action, this.isPhoto, ref this.path, paths, false);
+                            Finish();
                             OnMediaPicked(e);
-                            Finish();
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            future = GetMediaFileAsync(this, requestCode, this.action, this.isPhoto, ref this.path, paths, false);
-
                             Finish();
-
-                            future.ContinueWith(t => OnMediaPicked(t.Result));
+                            OnMediaPicked(new MediaPickedEventArgs(requestCode, ex));
                         }
                     }
-                }
+                    else
+                    {
+                        future = GetMediaFileAsync(this, requestCode, this.action, this.isPhoto, ref this.path, paths, false);
+                        future.ContinueWith(t =>
+                        {
+                            if (t.IsFaulted)
+                            {
+                                OnMediaPicked(new MediaPickedEventArgs(requestCode, t.Exception));
+                            }
+                            else
+                            {
+                                OnMediaPicked(t.Result);
+                            }
+                        });
+                        Finish();
+                    }
+                }      
             }
 
             else
@@ -377,16 +409,24 @@ namespace Plugin.Media
                                    {
                                        using (Stream input = context.ContentResolver.OpenInputStream(path))
                                        using (Stream output = File.Create(outputPath.Path))
-                                           input.CopyTo(output);
+                                       input.CopyTo(output);
                                        contentPath = outputPath.Path;
                                    }
-                                   catch (Java.IO.FileNotFoundException)
+                                   catch (Java.IO.FileNotFoundException ex)
                                    {
+                                       System.Diagnostics.Debug.WriteLine(ex.Message);
+                                       throw ex;
                                        // If there's no data associated with the uri, we don't know
                                        // how to open this. contentPath will be null which will trigger
                                        // MediaFileNotFoundException.
                                    }
+                                   catch (Exception ex)
+                                   {
+                                       System.Diagnostics.Debug.WriteLine(ex.Message);
+                                       throw ex;
+                                   }
                                }
+
                                result.Add(new Tuple<string, bool>(contentPath, false));
                            }
                        }
